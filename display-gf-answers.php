@@ -9,49 +9,73 @@
 */
 
 /**
- * save 'entry id' for each practical exercise for each user -> user meta?
- * https://docs.gravityforms.com/gform_after_submission/
+ * save 'entry id' for each practical exercise for each user
 */
 add_action('gform_after_submission','ta_save_gf_info',10,2);
 function ta_save_gf_info($entry,$form) {
 	global $current_user;
-	// data to store in user meta. 0->id of this entry, 1->form pdf id, 2-> form title
-	$pdf_info = array(
-		$entry['id'],
-		array_keys($form['gfpdf_form_settings'])[0],
-		$form['title']
-	);
-	// save data to user meta
-	add_user_meta($current_user->ID,'gf_prac_ex_info',$pdf_info,false);
+	global $post;
+
+	$pdf_id = array_keys($form['gfpdf_form_settings'])[0];
+	if($post->post_type==='sfwd-topic' && strpos($post->post_title,'Practical Exercise')>0) {
+		// data to store in user meta. 0->form pdf id, 1->id of this entry
+		$pdf_info = "{$pdf_id},{$entry['id']}";
+
+		// save data to user meta
+		add_user_meta($current_user->ID,"ta_prac_ex_{$form['title']}",$pdf_info,false);
+	}
+
 }
 
-
 /**
- * on page, look for any entry ids and generate link to display each
+ * on page with [ta_prac_ex_submissions] shortcode, look for any entry ids and generate link to display each
  * gfpdf settings automatically only allow the pdf owner (+ admins) to view, so
  * no need to set up our own protocols besides checking that user is logged in
 */
-add_action('genesis_entry_content','ta_display_gf_pdfs',10,2);
-function ta_display_gf_pdfs() {
+add_shortcode('ta_prac_ex_submissions','ta_display_gf_pdfs');
+function ta_display_gf_pdfs($atts, $content=null, $code="") {
 	global $current_user;
 	$user_id = $current_user->ID;
-	// if user is logged in & we're on the right page
-	if(is_page(6648)) {
-		if($user_id) {
-			// check for info in user meta
-			// 0->entry id, 1->pdf id, 2->form title
-			$pdf_info = get_user_meta($user_id,'gf_prac_ex_info',false);
+	$output = '';
+	// if user is logged in
+	if($user_id) {
+		global $wpdb;
+		// check for info in user meta
+		// 0->pdf id, 1->entry id
+		$sql = "SELECT * FROM {$wpdb->prefix}usermeta WHERE meta_key LIKE 'ta_prac_ex_%' AND user_id = {$user_id}";
+		$pdf_info = $wpdb->get_results($sql);
 
-			// loop over array of pdf infos and print a view link for each -> link text = form title
-			foreach($pdf_info as $entry_pdf) {
-				if(is_array($entry_pdf)) {
-					echo "<p>" . do_shortcode("[gravitypdf id='{$entry_pdf[1]}' entry='{$entry_pdf[0]}' type='view' text='{$entry_pdf[2]}']") . "</p>";
-				}
-			}
+		// if there aren't any PDFs to display, print a message and quit
+		if(!$pdf_info) {
+			$output = "<p>You haven't completed any practical exercises yet. Once you've done some exercises, you can see your work here.</p>";
+			return $output;
 		} else {
-			echo "Please log in to view this page.";
+			$output = "<p style='margin-bottom:0;'>Click below to view your work for each of the practical exercises that you've completed.</p>";
 		}
+
+		// organize db data for printing
+		$shortcode_data = array();
+		foreach($pdf_info as $meta_object) {
+			$key = $meta_object->meta_key;
+			$title = substr($key,strpos($key,'ta_prac_ex_')+11);
+			$shortcode_data[$title] = $meta_object->meta_value;
+		}
+		// sort shortcode data - desc alphabetical
+		ksort($shortcode_data);
+
+		// loop over shortcode data and print a view link for each pdf -> link text = form title
+		foreach($shortcode_data as $title=>$entry_pdf) {
+			if(gettype($entry_pdf)==='string') {
+				$pdf_id = substr($entry_pdf,0,strpos($entry_pdf,','));
+				$entry_id = substr($entry_pdf,strpos($entry_pdf,',')+1);
+				$output .= "<p style='margin-bottom:0;'>" . do_shortcode("[gravitypdf id='{$pdf_id}' entry='{$entry_id}' type='view' text='{$title}']") . "</p>";
+			}
+		}
+	} else {
+		$output = "Please log in to view this page.";
 	}
+
+	return $output;
 }
 
 ?>
